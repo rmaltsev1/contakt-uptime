@@ -41,5 +41,5 @@ try "www.$SITE не перенаправляет на $SITE" www_redirects
 try "Заявки/бот не работают (/api/health: бэкенд, база или Telegram)" backend_ok
 try "SSL-сертификат истекает меньше чем через $CERT_MIN_DAYS дней" cert_valid
 
-for f in "${failures[@]}"; do echo "$f"; done
+for f in "${failures[@]+"${failures[@]}"}"; do echo "$f"; done
 [ "${#failures[@]}" -eq 0 ]
