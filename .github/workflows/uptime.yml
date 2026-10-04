@@ -1,0 +1,65 @@
+name: Uptime
+
+# Checks contactmeister.de every 10 minutes and messages Telegram when something breaks / recovers.
+# Repository secrets: TELEGRAM_BOT_TOKEN (the CONTACT bot), TELEGRAM_CHAT_ID (who gets the alerts).
+# The last state lives in the Actions cache, so an outage is reported once (repeated every 6 h), not every run.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write # cache + keeping this scheduled workflow enabled (see last step)
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Restore last state
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: uptime-state-${{ github.run_id }}
+          restore-keys: uptime-state-
+
+      - name: Check the site
+        id: check
+        run: |
+          set +e
+          ./check.sh > failures.txt
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          cat failures.txt
+
+      - name: Notify Telegram on change
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: ./notify.sh "${{ steps.check.outputs.code }}" failures.txt
+
+      - name: Save state
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: uptime-state-${{ github.run_id }}
+
+      # GitHub pauses scheduled workflows in repos without commits for 60 days; re-enabling
+      # the workflow through the API once a week keeps it running.
+      - name: Keep the schedule alive
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          # ~ once a week (every 1000th run at 10-minute intervals)
+          if [ $(( RUN_NUMBER % 1000 )) -eq 0 ]; then
+            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/uptime.yml/enable"
+          fi
